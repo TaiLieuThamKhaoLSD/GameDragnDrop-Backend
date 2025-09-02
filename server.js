@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// ======== BIẾN LƯU TRỮ TRẠNG THÁI SERVER ========
 // Biến lưu trữ trạng thái game
 let gameSession = {
   isActive: false,
@@ -15,13 +16,13 @@ let gameSession = {
   endTime: null
 };
 
-// Biến lưu trữ kết quả từ users
+// Biến lưu trữ kết quả từ users (mảng các object kết quả)
 let gameResults = [];
 
-// Biến lưu trữ người chơi đã kết nối (đăng nhập)
+// Biến lưu trữ người chơi đã kết nối (dùng Set để tránh trùng lặp)
 let connectedPlayers = new Set();
 
-// ======== GAME SESSION APIs ========
+// ======== API QUẢN LÝ PHIÊN GAME ========
 
 // POST - LanAnhT02 bắt đầu game
 app.post('/api/game/start', (req, res) => {
@@ -43,11 +44,13 @@ app.post('/api/game/start', (req, res) => {
       endTime: null
     };
     
-    // Reset kết quả cũ
+    // Reset kết quả cũ của game trước
     gameResults = [];
     
-    // Reset danh sách người chơi kết nối
-    connectedPlayers.clear();
+    // Note: Không xóa connectedPlayers ở đây nữa. 
+    // connectedPlayers sẽ được giữ lại để theo dõi những ai đã kết nối.
+    // Nếu muốn reset hoàn toàn danh sách người chơi, có thể uncomment dòng dưới.
+    // connectedPlayers.clear(); 
     
     console.log('🎮 Game đã bắt đầu bởi LanAnhT02');
     
@@ -60,7 +63,7 @@ app.post('/api/game/start', (req, res) => {
     console.error('❌ Lỗi khi bắt đầu game:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi bắt đầu game'
     });
   }
 });
@@ -88,13 +91,14 @@ app.post('/api/game/end', (req, res) => {
       success: true,
       message: 'Game đã kết thúc!',
       session: gameSession,
-      results: gameResults
+      // Có thể trả kèm kết quả cuối cùng nếu cần
+      // results: gameResults 
     });
   } catch (error) {
     console.error('❌ Lỗi khi kết thúc game:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi kết thúc game'
     });
   }
 });
@@ -110,20 +114,21 @@ app.get('/api/game/status', (req, res) => {
     console.error('❌ Lỗi khi kiểm tra trạng thái game:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi kiểm tra trạng thái game'
     });
   }
 });
 
-// ======== PLAYER CONNECTION APIs ========
+// ======== API THEO DÕI NGƯỜI CHƠI KẾT NỐI ========
 
-// POST - Theo dõi người chơi đăng nhập
+// POST - Theo dõi người chơi đăng nhập (kết nối)
 app.post('/api/player/connect', (req, res) => {
   try {
     const { user } = req.body;
     
-    // Thêm người chơi vào danh sách kết nối
+    // Tạo key duy nhất cho người chơi
     const playerKey = `${user.username}|${user.fullname}`;
+    // Thêm vào Set (Set tự động loại bỏ trùng lặp)
     connectedPlayers.add(playerKey);
     
     console.log(`👤 Người chơi đã kết nối: ${user.fullname} (${user.username})`);
@@ -138,7 +143,7 @@ app.post('/api/player/connect', (req, res) => {
     console.error('❌ Lỗi khi theo dõi kết nối người chơi:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi theo dõi kết nối'
     });
   }
 });
@@ -161,14 +166,15 @@ app.get('/api/players/connected', (req, res) => {
     console.error('❌ Lỗi khi lấy danh sách người chơi:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi lấy danh sách người chơi'
     });
   }
 });
 
-// ======== GAME RESULTS APIs ========
+// ======== API XỬ LÝ KẾT QUẢ GAME ========
 
 // POST - User gửi kết quả (chỉ khi game đang active)
+// Cập nhật để xử lý cấu trúc items mới { french: [...], vietnam: [...], unassigned: [...] }
 app.post('/api/results', (req, res) => {
   try {
     // Kiểm tra game có đang active không
@@ -181,15 +187,25 @@ app.post('/api/results', (req, res) => {
     
     const data = req.body;
     
-    // Thêm kết quả vào danh sách
+    // Validate dữ liệu cơ bản
+    if (!data.user || !data.items) {
+      return res.status(400).json({
+        success: false,
+        message: 'Dữ liệu gửi lên không hợp lệ. Thiếu user hoặc items.'
+      });
+    }
+
+    // Tạo object kết quả để lưu
     const result = {
-      ...data,
+      user: data.user,
+      items: data.items, // Giữ nguyên cấu trúc { french, vietnam, unassigned }
       submittedAt: new Date().toISOString()
     };
     
+    // Thêm kết quả vào mảng
     gameResults.push(result);
     
-    console.log(`✅ Nhận kết quả từ ${data.user.fullname}`);
+    console.log(`✅ Nhận kết quả từ ${data.user.fullname} (Tổng: ${gameResults.length} kết quả)`);
     
     res.json({
       success: true,
@@ -199,12 +215,12 @@ app.post('/api/results', (req, res) => {
     console.error('❌ Lỗi khi nhận kết quả:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi nhận kết quả'
     });
   }
 });
 
-// GET - Lấy tất cả kết quả (cho LanAnhT02)
+// GET - Lấy tất cả kết quả (cho LanAnhT02 xem)
 app.get('/api/results', (req, res) => {
   try {
     res.json({
@@ -216,37 +232,38 @@ app.get('/api/results', (req, res) => {
     console.error('❌ Lỗi khi lấy kết quả:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server'
+      message: 'Lỗi server khi lấy kết quả'
     });
   }
 });
 
-// ======== HEALTH CHECK ========
+// ======== API KIỂM TRA SỨC KHỎE SERVER ========
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
-    message: 'Backend đang hoạt động',
+    message: 'Backend đang hoạt động ổn định',
     timestamp: new Date().toISOString()
   });
 });
 
-// Root endpoint
+// Root endpoint - Thông tin API
 app.get('/', (req, res) => {
   res.json({
-    message: 'Multiplayer Drag & Drop Game Backend',
+    message: 'Multiplayer Drag & Drop Game Backend API',
     endpoints: {
       'POST /api/game/start': 'LanAnhT02 bắt đầu game',
       'POST /api/game/end': 'LanAnhT02 kết thúc game',
       'GET /api/game/status': 'Kiểm tra trạng thái game',
       'POST /api/player/connect': 'Theo dõi người chơi đăng nhập',
       'GET /api/players/connected': 'Lấy danh sách người chơi đã kết nối',
-      'POST /api/results': 'User gửi kết quả',
-      'GET /api/results': 'Lấy tất cả kết quả',
-      'GET /api/health': 'Kiểm tra trạng thái'
+      'POST /api/results': 'User gửi kết quả game (kèm french, vietnam, unassigned)',
+      'GET /api/results': 'Lấy tất cả kết quả game',
+      'GET /api/health': 'Kiểm tra trạng thái server'
     }
   });
 });
 
+// Khởi động server
 app.listen(PORT, () => {
   console.log(`🟢 Backend đang chạy tại port ${PORT}`);
   console.log(`📝 API endpoints:`);
